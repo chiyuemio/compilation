@@ -1,0 +1,9 @@
+/home/llvm_10/homework1/build/CMakeFiles/install/local.dir
+/home/llvm_10/homework1/build/CMakeFiles/install.dir
+/home/llvm_10/homework1/build/CMakeFiles/list_install_components.dir
+/home/llvm_10/homework1/build/CMakeFiles/rebuild_cache.dir
+/home/llvm_10/homework1/build/CMakeFiles/edit_cache.dir
+/home/llvm_10/homework1/build/CMakeFiles/ast-interpreter.dir
+/home/llvm_10/homework1/build/CMakeFiles/clang-tablegen-targets.dir
+/home/llvm_10/homework1/build/CMakeFiles/install/strip.dir
+/home/llvm_10/homework1/build/CMakeFiles/intrinsics_gen.dir

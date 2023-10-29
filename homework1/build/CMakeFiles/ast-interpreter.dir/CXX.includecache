@@ -1,0 +1,38 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/llvm_10/homework1/ASTInterpreter.cpp
+clang/AST/ASTConsumer.h
+/home/llvm_10/homework1/clang/AST/ASTConsumer.h
+clang/AST/EvaluatedExprVisitor.h
+/home/llvm_10/homework1/clang/AST/EvaluatedExprVisitor.h
+clang/Frontend/CompilerInstance.h
+/home/llvm_10/homework1/clang/Frontend/CompilerInstance.h
+clang/Frontend/FrontendAction.h
+/home/llvm_10/homework1/clang/Frontend/FrontendAction.h
+clang/Tooling/Tooling.h
+/home/llvm_10/homework1/clang/Tooling/Tooling.h
+Environment.h
+/home/llvm_10/homework1/Environment.h
+
+/home/llvm_10/homework1/Environment.h
+stdio.h
+-
+clang/AST/ASTConsumer.h
+/home/llvm_10/homework1/clang/AST/ASTConsumer.h
+clang/AST/Decl.h
+/home/llvm_10/homework1/clang/AST/Decl.h
+clang/AST/RecursiveASTVisitor.h
+/home/llvm_10/homework1/clang/AST/RecursiveASTVisitor.h
+clang/Frontend/CompilerInstance.h
+/home/llvm_10/homework1/clang/Frontend/CompilerInstance.h
+clang/Frontend/FrontendAction.h
+/home/llvm_10/homework1/clang/Frontend/FrontendAction.h
+clang/Tooling/Tooling.h
+/home/llvm_10/homework1/clang/Tooling/Tooling.h
+
