@@ -56,11 +56,42 @@ public:
 
       //根据cond判断的结果visit需要执行的子树
       if(mEnv->getExprValue(cond)){
-         VisitStmt(ifstmt->getThen());
+         Visit(ifstmt->getThen());
       }else{
-         VisitStmt(ifstmt->getElse());
+         if(Stmt *elseStmt=ifstmt->getElse()){
+            Visit(elseStmt);
+         }
       }
+   }
 
+   virtual void VisitWhileStmt(WhileStmt *whilestmt){
+
+      Expr *cond=whilestmt->getCond();
+      Stmt *body=whilestmt->getBody();
+
+      Visit(cond);
+
+      while(mEnv->getExprValue(cond)){
+         Visit(body);
+         Visit(cond);
+      }
+   }
+
+   virtual void VisitForStmt(ForStmt *forstmt){
+
+      Stmt *init=forstmt->getInit();
+      Expr *cond=forstmt->getCond();
+      Expr *inc=forstmt->getInc();
+      Stmt *body=forstmt->getBody();
+
+      Visit(init);
+      Visit(cond);
+
+      while(mEnv->getExprValue(cond)){
+         Visit(body);
+         Visit(inc);
+         Visit(cond);
+      }
    }
 
 private:
