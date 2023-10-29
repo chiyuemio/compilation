@@ -60,7 +60,7 @@ public:
 class Environment {
    std::vector<StackFrame> mStack;
 
-   FunctionDecl * mFree;				/// Declartions to the built-in functions
+   FunctionDecl * mFree;/// Declartions to the built-in functions
    FunctionDecl * mMalloc;
    FunctionDecl * mInput;
    FunctionDecl * mOutput;
@@ -70,8 +70,6 @@ public:
    /// Get the declartions to the built-in functions
    Environment() : mStack(), mFree(NULL), mMalloc(NULL), mInput(NULL), mOutput(NULL), mEntry(NULL) {
    }
-
-
    /// Initialize the Environment
    void init(TranslationUnitDecl * unit) {
 	   for (TranslationUnitDecl::decl_iterator i =unit->decls_begin(), e = unit->decls_end(); i != e; ++ i) {
@@ -90,18 +88,29 @@ public:
 	   return mEntry;
    }
 
+   int getExprValue(Expr *expr){
+		if(IntegerLiteral *literal = dyn_cast<IntegerLiteral>(expr)){
+			return literal->getValue().getSExtValue();
+		}else{
+			return mStack.back().getStmtVal(expr);
+		}
+   }
+
    /// !TODO Support comparison operation
    void binop(BinaryOperator *bop) {
 	   Expr * left = bop->getLHS();
 	   Expr * right = bop->getRHS();
 
 	   if (bop->isAssignmentOp()) {
-		   int val = mStack.back().getStmtVal(right);
+			//赋值语句
+		   int val = getExprValue(right);
 		   mStack.back().bindStmt(left, val);
 		   if (DeclRefExpr * declexpr = dyn_cast<DeclRefExpr>(left)) {
 			   Decl * decl = declexpr->getFoundDecl();
 			   mStack.back().bindDecl(decl, val);
 		   }
+	   }else if(bop->isComparisonOp()){
+			//比较操作
 	   }
    }
 
@@ -110,6 +119,7 @@ public:
 			   it != ie; ++ it) {
 		   Decl * decl = *it;
 		   if (VarDecl * vardecl = dyn_cast<VarDecl>(decl)) {
+				//新定义的变量初始化为0
 			   mStack.back().bindDecl(vardecl, 0);
 		   }
 	   }
