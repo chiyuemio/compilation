@@ -88,30 +88,92 @@ public:
 	   return mEntry;
    }
 
-   int getExprValue(Expr *expr){
-		if(IntegerLiteral *literal = dyn_cast<IntegerLiteral>(expr)){
-			return literal->getValue().getSExtValue();
-		}else{
-			return mStack.back().getStmtVal(expr);
-		}
+   int getExprValue(Expr *expr){	
+		return mStack.back().getStmtVal(expr);
    }
 
+	//保存IntegerLiteral和CharacterLIteral到栈
+	void literal(Expr *expr){
+		if(IntegerLiteral *literal = dyn_cast<IntegerLiteral>(expr)){
+			//整数
+			mStack.back().bindStmt(expr,literal->getValue().getSExtValue());
+		}else if(CharacterLiteral *literal = dyn_cast<CharacterLiteral>(expr)){
+			//char
+			mStack.back().bindStmt(expr,literal->getValue());
+		}
+	}
+
    /// !TODO Support comparison operation
-   void binop(BinaryOperator *bop) {
+   //二元运算
+   void binop(BinaryOperator *bop){
+
+		typedef BinaryOperatorKind Opcode;		
 	   Expr * left = bop->getLHS();
 	   Expr * right = bop->getRHS();
+	   int result=0;//二元表达式的计算结果
+	   //赋值运算：=,*=,/=,+=,-=,
+	   //算术和逻辑运算：+,-,*,/,%,<<,>>,&,^,|
 
 	   if (bop->isAssignmentOp()) {
-			//赋值语句
-		   int val = getExprValue(right);
+			//赋值语句,val赋值给left
+		   int val = mStack.back().getStmtVal(right);
 		   mStack.back().bindStmt(left, val);
 		   if (DeclRefExpr * declexpr = dyn_cast<DeclRefExpr>(left)) {
 			   Decl * decl = declexpr->getFoundDecl();
 			   mStack.back().bindDecl(decl, val);
 		   }
-	   }else if(bop->isComparisonOp()){
+		   result=val;
+	   }else{
 			//比较操作
+			Opcode opc=bop->getOpcode();
+			int leftValue=mStack.back().getStmtVal(left);
+			int rightValue=mStack.back().getStmtVal(right);
+
+			switch (opc)
+			{
+			case BO_Add: result=leftValue+rightValue; break;
+			case BO_Sub: result=leftValue-rightValue; break;
+			case BO_Mul: result=leftValue*rightValue; break;
+			case BO_Div: result=leftValue/rightValue; break;
+			case BO_EQ: result=leftValue==rightValue; break;
+			case BO_LT: result=leftValue<rightValue; break;
+			case BO_NE: result=leftValue!=rightValue; break;
+			case BO_GT: result=leftValue>rightValue; break;
+			case BO_LE: result=leftValue<=rightValue; break;
+			case BO_GE: result=leftValue>=rightValue; break;
+
+			default:
+				llvm::errs()<<"Unhandled binary operator.";
+			}
 	   }
+	   mStack.back().bindStmt(bop,result);
+   }
+
+	//一元运算
+   void unaryop(UnaryOperator *uop){
+		typedef UnaryOperatorKind Opcode;
+		int result = 0;
+
+		//算术运算：+,-,~,!
+		//++，--(前后)
+		//地址：&，*
+		
+		if(uop->isArithmeticOp()){
+			Opcode opc=uop->getOpcode();
+			int value=mStack.back().getStmtVal(uop->getSubExpr());
+
+			switch (opc)
+			{
+			case UO_Plus: result=+value; break;
+			case UO_Minus: result=-value; break;
+			case UO_Not: result=~value; break;//按位取反，每一位0变1,1变0
+			case UO_LNot: result=!value; break;//逻辑取反，真值变为i假值，假值变为真值
+			
+			default:
+				llvm::errs()<<"Unhandled unary operator.";
+			}
+		}
+		mStack.back().bindStmt(uop,result);
    }
 
    void decl(DeclStmt * declstmt) {
@@ -119,11 +181,19 @@ public:
 			   it != ie; ++ it) {
 		   Decl * decl = *it;
 		   if (VarDecl * vardecl = dyn_cast<VarDecl>(decl)) {
-				//新定义的变量初始化为0
-			   mStack.back().bindDecl(vardecl, 0);
+				
+				if(vardecl->hasInit()){
+					//新变量声明时初始化
+					mStack.back().bindDecl(vardecl,mStack.back().getStmtVal(vardecl->getInit()));
+				}else{
+					//新变量声明时未初始化
+					mStack.back().bindDecl(vardecl, 0);
+				}			   
 		   }
 	   }
    }
+
+   //为DeclRefExpr复制一份对应的DeclStmt值，便于直接引用
    void declref(DeclRefExpr * declref) {
 	   mStack.back().setPC(declref);
 	   if (declref->getType()->isIntegerType()) {

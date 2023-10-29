@@ -18,10 +18,20 @@ public:
    : EvaluatedExprVisitor(context), mEnv(env) {}
    virtual ~InterpreterVisitor() {}
 
+   virtual void VisitIntegerLiteral(IntegerLiteral *literal){
+      mEnv->literal(literal);
+   }
+
    virtual void VisitBinaryOperator (BinaryOperator * bop) {
 	   VisitStmt(bop);
 	   mEnv->binop(bop);
    }
+
+   virtual void VisitUnaryOperator(UnaryOperator *uop){
+      VisitStmt(uop);
+      mEnv->unaryop(uop);
+   }
+
    virtual void VisitDeclRefExpr(DeclRefExpr * expr) {
 	   VisitStmt(expr);
 	   mEnv->declref(expr);
@@ -35,8 +45,24 @@ public:
 	   mEnv->call(call);
    }
    virtual void VisitDeclStmt(DeclStmt * declstmt) {
+      VisitStmt(declstmt);
 	   mEnv->decl(declstmt);
    }
+
+   virtual void VisitIfStmt(IfStmt *ifstmt){
+      //VisitSTmt()：取出参数的所有子结点进行遍历，但会忽略当前节点本身，因此此处不使用
+      Expr *cond=ifstmt->getCond();
+      Visit(cond);
+
+      //根据cond判断的结果visit需要执行的子树
+      if(mEnv->getExprValue(cond)){
+         VisitStmt(ifstmt->getThen());
+      }else{
+         VisitStmt(ifstmt->getElse());
+      }
+
+   }
+
 private:
    Environment * mEnv;
 };
