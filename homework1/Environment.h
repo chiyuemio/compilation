@@ -14,8 +14,8 @@ using namespace clang;
 class StackFrame {
    /// StackFrame maps Variable Declaration to Value //将变量声明映射到值
    /// Which are either integer or addresses (also represented using an Integer value)
-   std::map<Decl*, int> mVars;//变量
-   std::map<Stmt*, int> mExprs;//表达式
+   std::map<Decl*, int> mVars;//变量，Decl无法被Visit遍历
+   std::map<Stmt*, int> mExprs;//表达式，Stmt可以被遍历
    /// The current stmt
    Stmt * mPC;
    int returnValue;//保存当前栈的返回值，整数
@@ -26,24 +26,27 @@ public:
    void bindDecl(Decl* decl, int val) {
       mVars[decl] = val;
    }    
-
 	bool hasDecl(Decl *decl){
 		return (mVars.find(decl)!=mVars.end());
 	}
-
    int getDeclVal(Decl * decl) {
       //assert的作用是先计算表达式 expression 
 	  //如果其值为假（即为0），那么它先向stderr打印一条出错信息，然后通过调用 abort 来终止程序运行
 	  assert (mVars.find(decl) != mVars.end());
       return mVars.find(decl)->second;
    }
+
    void bindStmt(Stmt * stmt, int val) {
 	   mExprs[stmt] = val;
+   }
+   bool hasStmt(Stmt *stmt){
+	return (mExprs.find(stmt)!=mExprs.end());
    }
    int getStmtVal(Stmt * stmt) {
 	   assert (mExprs.find(stmt) != mExprs.end());
 	   return mExprs[stmt];
    }
+
    void setPC(Stmt * stmt) {
 	   mPC = stmt;
    }
@@ -77,11 +80,15 @@ class Environment {
    FunctionDecl * mMalloc;
    FunctionDecl * mInput;
    FunctionDecl * mOutput;
-
    FunctionDecl * mEntry;
+   
+   std::map<Decl*, int> gVars;
+
 public:
    /// Get the declartions to the built-in functions
    Environment() : mStack(), mFree(NULL), mMalloc(NULL), mInput(NULL), mOutput(NULL), mEntry(NULL) {
+		//初始化栈，临时存储用于计算的全局变量
+		mStack.push_back(StackFrame());
    }
    /// Initialize the Environment
    void init(TranslationUnitDecl * unit) {
@@ -92,9 +99,18 @@ public:
 			   else if (fdecl->getName().equals("GET")) mInput = fdecl;
 			   else if (fdecl->getName().equals("PRINT")) mOutput = fdecl;
 			   else if (fdecl->getName().equals("main")) mEntry = fdecl;
+		   }else if(VarDecl *vdecl=dyn_cast<VarDecl>(*i)){
+				//保存全局变量
+				Stmt *initStmt=vdecl->getInit();
+				if(mStack.back().hasStmt(initStmt)){
+					gVars[vdecl]=mStack.back().getStmtVal(initStmt);
+				}else{
+					gVars[vdecl]=0;//未初始化的全局变量默认为0
+				}
 		   }
 	   }
-	   mStack.push_back(StackFrame());
+	   mStack.pop_back();//清除临时栈
+	   mStack.push_back(StackFrame());//入口函数main的栈
    }
 
    FunctionDecl * getEntry() {
@@ -211,8 +227,14 @@ public:
 	   mStack.back().setPC(declref);
 	   if (declref->getType()->isIntegerType()) {
 		   Decl* decl = declref->getFoundDecl();
+		   int val;
 
-		   int val = mStack.back().getDeclVal(decl);
+		   if(mStack.back().hasDecl(decl)){
+				val=mStack.back().getDeclVal(decl);
+		   }else{
+				assert(gVars.find(decl)!=gVars.end());
+				val=gVars[decl];
+		   }
 		   mStack.back().bindStmt(declref, val);
 	   }
    }
