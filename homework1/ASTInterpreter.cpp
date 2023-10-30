@@ -42,8 +42,26 @@ public:
    }
    virtual void VisitCallExpr(CallExpr * call) {
 	   VisitStmt(call);
-	   mEnv->call(call);
+      //内建函数不需要后续处理
+      if(mEnv->builtinfunc(call)){
+         return;
+      }
+      //创建新栈并进行参数绑定
+      mEnv->enterfunc(call);
+      //便利函数体
+      VisitStmt(call->getDirectCallee()->getBody());
+      //弹栈，进行返回值绑定
+	   mEnv->exitfunc(call);
    }
+
+   virtual void VisitReturnStmt(ReturnStmt *ret){
+      //计算返回值，有点函数无返回值，因此此处不进行返回
+      //main函数特殊返回情况：FunctionDecl isMain()
+      //没有返回语句
+      VisitStmt(ret);
+      mEnv->retstmt(ret->getRetValue());
+   }
+
    virtual void VisitDeclStmt(DeclStmt * declstmt) {
       VisitStmt(declstmt);
 	   mEnv->decl(declstmt);
