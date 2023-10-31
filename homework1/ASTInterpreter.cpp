@@ -36,6 +36,15 @@ public:
 	   VisitStmt(expr);
 	   mEnv->declref(expr);
    }
+
+   virtual void VisitArraySubscriptExpr(ArraySubscriptExpr *arrayexpr){
+      VisitStmt(arrayexpr);
+      mEnv->array(arrayexpr);
+   }
+   virtual void VisitParenExpr(ParenExpr *parenexpr){
+      VisitStmt(parenexpr);
+   }
+
    virtual void VisitCastExpr(CastExpr * expr) {
 	   VisitStmt(expr);
 	   mEnv->cast(expr);
@@ -102,13 +111,23 @@ public:
       Expr *inc=forstmt->getInc();
       Stmt *body=forstmt->getBody();
 
-      Visit(init);
-      Visit(cond);
+      if(init){
+         Visit(init);
+      }
+      if(cond){
+         Visit(cond);
+      }
+      
 
       while(mEnv->getExprValue(cond)){
          Visit(body);
-         Visit(inc);
-         Visit(cond);
+         if(inc){
+            Visit(inc);
+         }
+         if(cond){
+            Visit(cond);
+         }
+         
       }
    }
 

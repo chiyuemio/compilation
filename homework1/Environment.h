@@ -14,36 +14,41 @@ using namespace clang;
 class StackFrame {
    /// StackFrame maps Variable Declaration to Value //将变量声明映射到值
    /// Which are either integer or addresses (also represented using an Integer value)
-   std::map<Decl*, int> mVars;//变量，Decl无法被Visit遍历
-   std::map<Stmt*, int> mExprs;//表达式，Stmt可以被遍历
+   std::map<Decl*, int64_t> mVars;//变量，Decl无法被Visit遍历
+   std::map<Stmt*, int64_t> mExprs;//表达式，Stmt可以被遍历
    /// The current stmt
    Stmt * mPC;
-   int returnValue;//保存当前栈的返回值，整数
+   int64_t returnValue;//保存当前栈的返回值，整数
 public:
    StackFrame() : mVars(), mExprs(), mPC() {
    }
 
-   void bindDecl(Decl* decl, int val) {
+   void bindDecl(Decl* decl, int64_t val) {
       mVars[decl] = val;
    }    
 	bool hasDecl(Decl *decl){
 		return (mVars.find(decl)!=mVars.end());
 	}
-   int getDeclVal(Decl * decl) {
+   int64_t getDeclVal(Decl * decl) {
       //assert的作用是先计算表达式 expression 
 	  //如果其值为假（即为0），那么它先向stderr打印一条出错信息，然后通过调用 abort 来终止程序运行
 	  assert (mVars.find(decl) != mVars.end());
       return mVars.find(decl)->second;
    }
 
-   void bindStmt(Stmt * stmt, int val) {
+   void bindStmt(Stmt * stmt, int64_t val) {
 	   mExprs[stmt] = val;
    }
    bool hasStmt(Stmt *stmt){
 	return (mExprs.find(stmt)!=mExprs.end());
    }
-   int getStmtVal(Stmt * stmt) {
-	   assert (mExprs.find(stmt) != mExprs.end());
+   int64_t getStmtVal(Stmt * stmt) {
+	   //assert (mExprs.find(stmt) != mExprs.end());
+		if(mExprs.find(stmt) == mExprs.end()){
+			llvm::errs() << "Can't find statement:\n";
+			stmt->dump();
+			assert(false);
+		}
 	   return mExprs[stmt];
    }
 
@@ -54,10 +59,10 @@ public:
 	   return mPC;
    }
 
-   	void setReturnValue(int value){
+   	void setReturnValue(int64_t value){
 		returnValue=value;
 	}
-	int getReturnValue(){
+	int64_t getReturnValue(){
 		return returnValue;
 	}
 };
@@ -82,7 +87,7 @@ class Environment {
    FunctionDecl * mOutput;
    FunctionDecl * mEntry;
    
-   std::map<Decl*, int> gVars;
+   std::map<Decl*, int64_t> gVars;
 
 public:
    /// Get the declartions to the built-in functions
@@ -117,9 +122,25 @@ public:
 	   return mEntry;
    }
 
-   int getExprValue(Expr *expr){	
+   int64_t getExprValue(Expr *expr){	
 		return mStack.back().getStmtVal(expr);
    }
+
+	//数组
+	void array(ArraySubscriptExpr *arraysubscript){
+
+		//getBase()获得指向数组声明的指针DeclRefExpr
+		//getIdx()获得索引
+		Expr *base=arraysubscript->getBase();
+		Expr *index=arraysubscript->getIdx();
+
+		//假设数组元素均int64类型
+		int64_t *basePtr=(int64_t *)mStack.back().getStmtVal(base);
+		int64_t indexVal=mStack.back().getStmtVal(index);
+
+		//将ArraySubscript表达式的值保存到栈
+		mStack.back().bindStmt(arraysubscript,(int64_t)(basePtr+indexVal));
+	}
 
 	//保存IntegerLiteral和CharacterLIteral到栈
 	void literal(Expr *expr){
@@ -139,24 +160,39 @@ public:
 		typedef BinaryOperatorKind Opcode;		
 	   Expr * left = bop->getLHS();
 	   Expr * right = bop->getRHS();
-	   int result=0;//二元表达式的计算结果
+	   int64_t result=0;//二元表达式的计算结果
 	   //赋值运算：=,*=,/=,+=,-=,
 	   //算术和逻辑运算：+,-,*,/,%,<<,>>,&,^,|
 
+		int64_t leftValue=mStack.back().getStmtVal(left);
+		int64_t rightValue=mStack.back().getStmtVal(right);
+
+		//判断右边值为ArraySubscriptExpr类型
+		if(isa<ArraySubscriptExpr>(right->IgnoreImpCasts())){
+			rightValue=*(int64_t *)rightValue;
+		}
+
 	   if (bop->isAssignmentOp()) {
-			//赋值语句,val赋值给left
-		   int val = mStack.back().getStmtVal(right);
-		   mStack.back().bindStmt(left, val);
+			
 		   if (DeclRefExpr * declexpr = dyn_cast<DeclRefExpr>(left)) {
 			   Decl * decl = declexpr->getFoundDecl();
-			   mStack.back().bindDecl(decl, val);
+			   mStack.back().bindDecl(decl, rightValue);
+		   }else if(isa<ArraySubscriptExpr>(left)){
+				int64_t *ptr=(int64_t *)mStack.back().getStmtVal(left);
+				*ptr=rightValue;
+		   }else if(false){
+				//UnaryOperator
 		   }
-		   result=val;
+		   result=rightValue;
 	   }else{
 			//比较操作
 			Opcode opc=bop->getOpcode();
-			int leftValue=mStack.back().getStmtVal(left);
-			int rightValue=mStack.back().getStmtVal(right);
+
+			if(isa<ArraySubscriptExpr>(left)){
+				leftValue=*(int64_t *)leftValue;
+			}
+			//int leftValue=mStack.back().getStmtVal(left);
+			//int rightValue=mStack.back().getStmtVal(right);
 
 			switch (opc)
 			{
@@ -181,7 +217,7 @@ public:
 	//一元运算
    void unaryop(UnaryOperator *uop){
 		typedef UnaryOperatorKind Opcode;
-		int result = 0;
+		int64_t result = 0;
 
 		//算术运算：+,-,~,!
 		//++，--(前后)
@@ -189,7 +225,7 @@ public:
 		
 		if(uop->isArithmeticOp()){
 			Opcode opc=uop->getOpcode();
-			int value=mStack.back().getStmtVal(uop->getSubExpr());
+			int64_t value=mStack.back().getStmtVal(uop->getSubExpr());
 
 			switch (opc)
 			{
@@ -197,7 +233,7 @@ public:
 			case UO_Minus: result=-value; break;
 			case UO_Not: result=~value; break;//按位取反，每一位0变1,1变0
 			case UO_LNot: result=!value; break;//逻辑取反，真值变为i假值，假值变为真值
-			
+			case UO_Deref: result=*(int64_t*)value; break;
 			default:
 				llvm::errs()<<"Unhandled unary operator.";
 			}
@@ -211,12 +247,26 @@ public:
 		   Decl * decl = *it;
 		   if (VarDecl * vardecl = dyn_cast<VarDecl>(decl)) {
 				
-				if(vardecl->hasInit()){
-					//新变量声明时初始化
-					mStack.back().bindDecl(vardecl,mStack.back().getStmtVal(vardecl->getInit()));
+				QualType type=vardecl->getType();
+
+				if(type->isIntegerType()){
+					if(vardecl->hasInit()){
+						mStack.back().bindDecl(vardecl,mStack.back().getStmtVal(vardecl->getInit()));
+					}else{
+						mStack.back().bindDecl(vardecl,0);
+					}
+				}else if(type->isArrayType()){
+					const ConstantArrayType *array = dyn_cast<ConstantArrayType>(type.getTypePtr());
+					int64_t size = array->getSize().getSExtValue();
+				   	int64_t * arrayStorage = new int64_t[size];
+					for (int64_t i = 0; i < size; i++) {
+						arrayStorage[i] = 0;
+					}
+					mStack.back().bindDecl(vardecl, (int64_t)arrayStorage);
 				}else{
-					//新变量声明时未初始化
-					mStack.back().bindDecl(vardecl, 0);
+					llvm::errs() << "Unhandled decl type: \n";
+		   		    declstmt->dump();
+				    type->dump();
 				}			   
 		   }
 	   }
@@ -225,9 +275,10 @@ public:
    //为DeclRefExpr复制一份对应的DeclStmt值，便于直接引用
    void declref(DeclRefExpr * declref) {
 	   mStack.back().setPC(declref);
-	   if (declref->getType()->isIntegerType()) {
+	   QualType type=declref->getType();
+	   if (type->isIntegerType() || type->isArrayType()) {
 		   Decl* decl = declref->getFoundDecl();
-		   int val;
+		   int64_t val;
 
 		   if(mStack.back().hasDecl(decl)){
 				val=mStack.back().getDeclVal(decl);
@@ -236,21 +287,36 @@ public:
 				val=gVars[decl];
 		   }
 		   mStack.back().bindStmt(declref, val);
+	   }else{
+			llvm::errs() <<"Unhandled declref type:\n";
+			declref->dump();
+			type->dump();
 	   }
    }
 
    void cast(CastExpr * castexpr) {
 	   mStack.back().setPC(castexpr);
-	   if (castexpr->getType()->isIntegerType()) {
+	   QualType type=castexpr->getType();
+
+	   if (castexpr->getType()->isIntegerType()||(type->isPointerType() && !type->isFunctionPointerType())) {
 		   Expr * expr = castexpr->getSubExpr();
-		   int val = mStack.back().getStmtVal(expr);
+		   int64_t val = mStack.back().getStmtVal(expr);
 		   mStack.back().bindStmt(castexpr, val );
+	   }else {
+		   llvm::errs() << "Unhandled cast type: \n";
+		   castexpr->dump();
+		   type->dump();
 	   }
    }
 
 	//返回值保存到栈
 	void retstmt(Expr *retexpr){
-		mStack.back().setReturnValue(mStack.back().getStmtVal(retexpr));
+		//mStack.back().setReturnValue(mStack.back().getStmtVal(retexpr));
+		int64_t retval=mStack.back().getStmtVal(retexpr);
+		if(isa<ArraySubscriptExpr>(retexpr->IgnoreImpCasts())){
+			retval=*(int64_t *)retval;
+		}
+		mStack.back().setReturnValue(retval);
 	}
 	//创建新栈进行参数绑定
 	void enterfunc(CallExpr *callexpr){
@@ -266,7 +332,7 @@ public:
 	}
 	//弹栈，返回值绑定
 	void exitfunc(CallExpr *callexpr){
-		int returnValue=mStack.back().getReturnValue();
+		int64_t returnValue=mStack.back().getReturnValue();
 		mStack.pop_back();
 		mStack.back().bindStmt(callexpr,returnValue);
 	}
@@ -274,11 +340,11 @@ public:
    ///内建函数
    bool builtinfunc(CallExpr * callexpr) {
 	   mStack.back().setPC(callexpr);
-	   int val = 0;
+	   int64_t val = 0;
 	   FunctionDecl * callee = callexpr->getDirectCallee();
 	   if (callee == mInput) {
 		  llvm::errs() << "Please Input an Integer Value : ";
-		  scanf("%d", &val);
+		  scanf("%ld", &val);
 
 		  mStack.back().bindStmt(callexpr, val);
 		  return true;
@@ -286,8 +352,17 @@ public:
 		   Expr * decl = callexpr->getArg(0);
 		   val = mStack.back().getStmtVal(decl);
 		   llvm::errs() << val;
+		   mStack.back().bindStmt(callexpr,0);
 		   return true;
-	   } else {
+	   }else if(callee==mMalloc){
+			int64_t size=mStack.back().getStmtVal(callexpr->getArg(0));
+			mStack.back().bindStmt(callexpr,(int64_t)malloc(size));
+			return true;
+	   }else if(callee==mFree){
+			int64_t *ptr=(int64_t *)mStack.back().getStmtVal(callexpr->getArg(0));
+			free(ptr);
+			return true;
+	   }else {
 		   /// You could add your code here for Function call Return
 		   return false;
 	   }
