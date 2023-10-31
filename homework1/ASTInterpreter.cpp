@@ -11,6 +11,8 @@ using namespace clang;
 
 #include "Environment.h"
 
+class ReturnException : public std::exception{};
+
 class InterpreterVisitor : 
    public EvaluatedExprVisitor<InterpreterVisitor> {
 public:
@@ -64,8 +66,12 @@ public:
       //创建新栈并进行参数绑定
       mEnv->enterfunc(call);
       //便利函数体
-      VisitStmt(call->getDirectCallee()->getBody());
+      //VisitStmt(call->getDirectCallee()->getBody());
       //弹栈，进行返回值绑定
+      try {
+         VisitStmt(call->getDirectCallee()->getBody());
+      } catch (ReturnException e) {
+      }
 	   mEnv->exitfunc(call);
    }
 
@@ -75,6 +81,7 @@ public:
       //没有返回语句
       VisitStmt(ret);
       mEnv->retstmt(ret->getRetValue());
+      throw ReturnException();
    }
 
    virtual void VisitDeclStmt(DeclStmt * declstmt) {
@@ -163,8 +170,12 @@ public:
 	   mEnv.init(decl);
 
 	   FunctionDecl * entry = mEnv.getEntry();
-	   mVisitor.VisitStmt(entry->getBody());
-  }
+	   //mVisitor.VisitStmt(entry->getBody());
+      try {
+         mVisitor.VisitStmt(entry->getBody());
+      } catch (ReturnException e) {
+      }
+   }
 private:
    Environment mEnv;
    InterpreterVisitor mVisitor;
