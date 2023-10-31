@@ -16,6 +16,7 @@ class StackFrame {
    /// Which are either integer or addresses (also represented using an Integer value)
    std::map<Decl*, int64_t> mVars;//变量，Decl无法被Visit遍历
    std::map<Stmt*, int64_t> mExprs;//表达式，Stmt可以被遍历
+   std::map<Stmt*, int64_t *> mPtrs;
    /// The current stmt
    Stmt * mPC;
    int64_t returnValue;//保存当前栈的返回值，整数
@@ -43,14 +44,26 @@ public:
 	return (mExprs.find(stmt)!=mExprs.end());
    }
    int64_t getStmtVal(Stmt * stmt) {
-	   //assert (mExprs.find(stmt) != mExprs.end());
+	#ifndef DEBUG
+	   assert (mExprs.find(stmt) != mExprs.end());
+	#else
 		if(mExprs.find(stmt) == mExprs.end()){
-			llvm::errs() << "Can't find statement:\n";
+			llvm::errs() << "DEBUG Can't find statement:\n";
 			stmt->dump();
 			assert(false);
 		}
+	#endif
 	   return mExprs[stmt];
    }
+
+	void bindPtr(Stmt *stmt, int64_t *val) { 
+		mPtrs[stmt] = val; 
+	}
+
+  	int64_t *getPtr(Stmt *stmt) {
+    	assert(mPtrs.find(stmt) != mPtrs.end());
+    	return mPtrs[stmt];
+  	}
 
    void setPC(Stmt * stmt) {
 	   mPC = stmt;
@@ -139,7 +152,8 @@ public:
 		int64_t indexVal=mStack.back().getStmtVal(index);
 
 		//将ArraySubscript表达式的值保存到栈
-		mStack.back().bindStmt(arraysubscript,(int64_t)(basePtr+indexVal));
+		mStack.back().bindPtr(arraysubscript,basePtr+indexVal);
+		mStack.back().bindStmt(arraysubscript,*(basePtr+indexVal));
 	}
 
 	//保存IntegerLiteral和CharacterLIteral到栈
@@ -153,6 +167,25 @@ public:
 		}
 	}
 
+	void ueot(UnaryExprOrTypeTraitExpr *ueotexpr) {
+    //需要再完善
+    	UnaryExprOrTypeTrait kind = ueotexpr->getKind();
+    	int64_t result = 0;
+    	switch (kind) {
+    	default:
+      		llvm::errs() << "Unhandled UEOT.";
+      	break;
+    	case UETT_SizeOf:
+      		result = 8; // int64_t 和 int64_t * 两种类型
+      		break;
+    	}	
+    	mStack.back().bindStmt(ueotexpr, result);
+  }
+
+  void paren(ParenExpr *parenexpr) {
+    mStack.back().bindStmt(parenexpr,mStack.back().getStmtVal(parenexpr->getSubExpr()));
+  }
+
    /// !TODO Support comparison operation
    //二元运算
    void binop(BinaryOperator *bop){
@@ -164,13 +197,8 @@ public:
 	   //赋值运算：=,*=,/=,+=,-=,
 	   //算术和逻辑运算：+,-,*,/,%,<<,>>,&,^,|
 
-		int64_t leftValue=mStack.back().getStmtVal(left);
+		//int64_t leftValue=mStack.back().getStmtVal(left);
 		int64_t rightValue=mStack.back().getStmtVal(right);
-
-		//判断右边值为ArraySubscriptExpr类型
-		if(isa<ArraySubscriptExpr>(right->IgnoreImpCasts())){
-			rightValue=*(int64_t *)rightValue;
-		}
 
 	   if (bop->isAssignmentOp()) {
 			
@@ -178,20 +206,32 @@ public:
 			   Decl * decl = declexpr->getFoundDecl();
 			   mStack.back().bindDecl(decl, rightValue);
 		   }else if(isa<ArraySubscriptExpr>(left)){
-				int64_t *ptr=(int64_t *)mStack.back().getStmtVal(left);
+				int64_t *ptr=mStack.back().getPtr(left);
 				*ptr=rightValue;
-		   }else if(false){
-				//UnaryOperator
-		   }
+		   }else if(UnaryOperator *uop=dyn_cast<UnaryOperator>(left)){
+				assert(uop->getOpcode() == UO_Deref);
+        		int64_t *ptr = mStack.back().getPtr(left);
+        		*ptr = rightValue;
+
+		   }else{
+			llvm::errs()<<"Can't find assignment operation:\n";
+			bop->dump();
+	   		}
 		   result=rightValue;
 	   }else{
 			//比较操作
 			Opcode opc=bop->getOpcode();
 
-			if(isa<ArraySubscriptExpr>(left)){
-				leftValue=*(int64_t *)leftValue;
-			}
-			//int leftValue=mStack.back().getStmtVal(left);
+			int64_t leftValue=mStack.back().getStmtVal(left);
+
+			if (left->getType()->isPointerType() && right->getType()->isIntegerType()) {
+        		assert(opc == BO_Add || opc == BO_Sub);
+        		rightValue *= sizeof(int64_t);
+      		} else if (left->getType()->isIntegerType() && right->getType()->isPointerType()) {
+        		assert(opc == BO_Add || opc == BO_Sub);
+        		leftValue *= sizeof(int64_t);
+      		}
+			
 			//int rightValue=mStack.back().getStmtVal(right);
 
 			switch (opc)
@@ -223,20 +263,19 @@ public:
 		//++，--(前后)
 		//地址：&，*
 		
-		if(uop->isArithmeticOp()){
-			Opcode opc=uop->getOpcode();
-			int64_t value=mStack.back().getStmtVal(uop->getSubExpr());
+		Opcode opc = uop->getOpcode();
+    	int64_t value = mStack.back().getStmtVal(uop->getSubExpr());
 
-			switch (opc)
-			{
-			case UO_Plus: result=+value; break;
-			case UO_Minus: result=-value; break;
-			case UO_Not: result=~value; break;//按位取反，每一位0变1,1变0
-			case UO_LNot: result=!value; break;//逻辑取反，真值变为i假值，假值变为真值
-			case UO_Deref: result=*(int64_t*)value; break;
-			default:
-				llvm::errs()<<"Unhandled unary operator.";
-			}
+    	switch (opc) {
+    		default: llvm::errs() << "Unhandled unary operator.";
+    		case UO_Plus: result = value; break;
+    		case UO_Minus: result = -value; break;
+    		case UO_Not: result = ~value; break;
+    		case UO_LNot: result = !value; break;
+    		case UO_Deref: 
+				mStack.back().bindPtr(uop, (int64_t *)value);
+				result = *(int64_t *)value;
+				break;
 		}
 		mStack.back().bindStmt(uop,result);
    }
@@ -249,7 +288,7 @@ public:
 				
 				QualType type=vardecl->getType();
 
-				if(type->isIntegerType()){
+				if(type->isIntegerType()||type->isPointerType()){
 					if(vardecl->hasInit()){
 						mStack.back().bindDecl(vardecl,mStack.back().getStmtVal(vardecl->getInit()));
 					}else{
@@ -276,7 +315,7 @@ public:
    void declref(DeclRefExpr * declref) {
 	   mStack.back().setPC(declref);
 	   QualType type=declref->getType();
-	   if (type->isIntegerType() || type->isArrayType()) {
+	   if (type->isIntegerType() || type->isArrayType()||type->isPointerType()) {
 		   Decl* decl = declref->getFoundDecl();
 		   int64_t val;
 
@@ -287,7 +326,7 @@ public:
 				val=gVars[decl];
 		   }
 		   mStack.back().bindStmt(declref, val);
-	   }else{
+	   }else if(!type->isFunctionProtoType()){
 			llvm::errs() <<"Unhandled declref type:\n";
 			declref->dump();
 			type->dump();
@@ -302,7 +341,7 @@ public:
 		   Expr * expr = castexpr->getSubExpr();
 		   int64_t val = mStack.back().getStmtVal(expr);
 		   mStack.back().bindStmt(castexpr, val );
-	   }else {
+	   }else if(!type->isFunctionPointerType()){
 		   llvm::errs() << "Unhandled cast type: \n";
 		   castexpr->dump();
 		   type->dump();
@@ -313,9 +352,9 @@ public:
 	void retstmt(Expr *retexpr){
 		//mStack.back().setReturnValue(mStack.back().getStmtVal(retexpr));
 		int64_t retval=mStack.back().getStmtVal(retexpr);
-		if(isa<ArraySubscriptExpr>(retexpr->IgnoreImpCasts())){
-			retval=*(int64_t *)retval;
-		}
+		//if(isa<ArraySubscriptExpr>(retexpr->IgnoreImpCasts())){
+		//	retval=*(int64_t *)retval;
+		//}
 		mStack.back().setReturnValue(retval);
 	}
 	//创建新栈进行参数绑定

@@ -32,6 +32,11 @@ public:
       mEnv->unaryop(uop);
    }
 
+   virtual void VisitUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *expr) {
+    // sizeof
+      mEnv->ueot(expr);
+   }
+
    virtual void VisitDeclRefExpr(DeclRefExpr * expr) {
 	   VisitStmt(expr);
 	   mEnv->declref(expr);
@@ -43,6 +48,7 @@ public:
    }
    virtual void VisitParenExpr(ParenExpr *parenexpr){
       VisitStmt(parenexpr);
+      mEnv->paren(parenexpr);
    }
 
    virtual void VisitCastExpr(CastExpr * expr) {
