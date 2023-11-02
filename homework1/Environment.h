@@ -316,6 +316,7 @@ public:
 	   mStack.back().setPC(declref);
 	   QualType type=declref->getType();
 	   if (type->isIntegerType() || type->isArrayType()||type->isPointerType()) {
+
 		   Decl* decl = declref->getFoundDecl();
 		   int64_t val;
 
@@ -360,10 +361,12 @@ public:
 	//创建新栈进行参数绑定
 	void enterfunc(CallExpr *callexpr){
 		FunctionDecl *callee=callexpr->getDirectCallee();
+
 		int paramCount=callee->getNumParams();
 		assert(paramCount==callexpr->getNumArgs());
 
 		StackFrame newFrame=StackFrame();
+		callee=callee->getDefinition();
 		for(int i=0;i<paramCount;i++){
 			newFrame.bindDecl(callee->getParamDecl(i),mStack.back().getStmtVal(callexpr->getArg(i)));
 		}
@@ -381,6 +384,9 @@ public:
 	   mStack.back().setPC(callexpr);
 	   int64_t val = 0;
 	   FunctionDecl * callee = callexpr->getDirectCallee();
+
+	   //callee = callee->getDefinition();//
+
 	   if (callee == mInput) {
 		  llvm::errs() << "Please Input an Integer Value : ";
 		  scanf("%ld", &val);
