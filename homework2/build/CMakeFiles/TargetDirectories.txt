@@ -1,0 +1,4 @@
+/home/llvm_10/homework2/homework2/build/CMakeFiles/rebuild_cache.dir
+/home/llvm_10/homework2/homework2/build/CMakeFiles/edit_cache.dir
+/home/llvm_10/homework2/homework2/build/CMakeFiles/llvmassignment.dir
+/home/llvm_10/homework2/homework2/build/CMakeFiles/intrinsics_gen.dir

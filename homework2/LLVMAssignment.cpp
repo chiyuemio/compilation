@@ -23,12 +23,23 @@
 #include <llvm/Transforms/Utils.h>
 
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/Pass.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 
+#ifdef DEBUG
+#define LOG_DEBUG(msg)                                                         \
+  do {                                                                         \
+    errs() << "[DEBUG] " << msg << "\n";                                       \
+  } while (0)
+#else
+#define LOG_DEBUG(msg)                                                         \
+  do {                                                                         \
+  } while (0)
+#endif
 
 using namespace llvm;
 static ManagedStatic<LLVMContext> GlobalContext;
@@ -55,15 +66,99 @@ char EnableFunctionOptPass::ID=0;
 ///Updated 11/10/2017 by fargo: make all functions
 ///processed by mem2reg before this pass.
 struct FuncPtrPass : public ModulePass {
+
   static char ID; // Pass identification, replacement for typeid
   FuncPtrPass() : ModulePass(ID) {}
 
+  std::map<unsigned int, std::vector<std::string>> results;
+  std::vector<std::string> tempFuncNames;
+
+private:
+  void addFuncName(const std::string funcName){
+    tempFuncNames.push_back(funcName);
+  }
+
+  void saveResultAndClearTemp(const unsigned int lineno){
+    //自动推断变量类型
+    auto result = results.find(lineno);
+    if(result==results.end()){
+      results.insert(std::pair<unsigned int, std::vector<std::string>>(lineno, tempFuncNames));
+    }else{
+      LOG_DEBUG("wound never happen!");
+    }
+    tempFuncNames.clear();
+  }
+
+  void printResults() const{
+    for(const auto &out: results){
+      errs() << out.first <<": ";
+      const auto &funcNames = out.second;
+      for(auto iter = funcNames.begin(); iter != funcNames.end(); iter++){
+        if(iter != funcNames.begin()){
+          errs() <<",";
+        }
+        errs() <<*iter;
+      }
+      errs()<<"\n";
+    }
+  }
+
+  //phi结点处理
+  void handlePHINode(const PHINode *phiNode){
+    for(const Value *value:phiNode->incoming_values()){
+      LOG_DEBUG("Incoming value for PHINode: "<<*value);
+      if(const Function *func=dyn_cast<Function>(value)){
+        addFuncName(func->getName().data());
+      }else if(const PHINode *innerPHINode=dyn_cast<PHINode>(value)){
+        handlePHINode(innerPHINode);
+      }else{
+        LOG_DEBUG("Unhandled PHINode incoming value: "<<*value);
+      }
+    }
+  }
+
+  //CallInst->函数调用，包含调用的函数名、传递给函数的参数
+  void handleCallInst(const CallInst *callInst){
+    //直接函数调用、或者被优化成直接调用的间接函数调用
+    if(const Function *func=callInst->getCalledFunction()){
+      std::string funcName=func->getName().data();
+      if(funcName=="llvm.dbg.value"){
+        return;
+      }
+      addFuncName(funcName);
+    }else{
+      //非直接调用
+      LOG_DEBUG("Indirect function invocation: "<<*callInst);
+      const Value *value=callInst->getCalledOperand();
+      LOG_DEBUG("value of indirect function invocation: "<<*value);
+      if(const PHINode *phiNode=dyn_cast<PHINode>(value)){
+        handlePHINode(phiNode);
+      }else{
+        LOG_DEBUG("Unhandled CallOperand Value: "<<*value);
+      }
+    }
+    saveResultAndClearTemp(callInst->getDebugLoc().getLine());
+  }
   
+
+public:
   bool runOnModule(Module &M) override {
     errs() << "Hello: ";
     errs().write_escaped(M.getName()) << '\n';
     M.dump();
     errs()<<"------------------------------\n";
+
+    for(const Function &f:M){
+      for(const BasicBlock &bb:f){
+        for(const Instruction &i:bb){
+          if(const CallInst *callInst=dyn_cast<CallInst>(&i)){
+            handleCallInst(callInst);
+          }
+        }
+      }
+    }
+    printResults();
+
     return false;
   }
 };

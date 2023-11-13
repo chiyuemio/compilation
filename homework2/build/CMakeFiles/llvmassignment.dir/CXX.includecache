@@ -1,0 +1,38 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/llvm_10/homework2/homework2/LLVMAssignment.cpp
+llvm/Support/CommandLine.h
+-
+llvm/IRReader/IRReader.h
+-
+llvm/IR/LLVMContext.h
+-
+llvm/Support/SourceMgr.h
+-
+llvm/IR/LegacyPassManager.h
+-
+llvm/Support/ToolOutputFile.h
+-
+llvm/Transforms/Scalar.h
+-
+llvm/Transforms/Utils.h
+-
+llvm/IR/Function.h
+-
+llvm/IR/Instructions.h
+-
+llvm/Pass.h
+-
+llvm/Support/raw_ostream.h
+-
+llvm/Bitcode/BitcodeReader.h
+-
+llvm/Bitcode/BitcodeWriter.h
+-
+
