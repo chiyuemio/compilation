@@ -105,20 +105,52 @@ private:
 
   //phi结点处理
   void handlePHINode(const PHINode *phiNode){
-    for(const Value *value:phiNode->incoming_values()){
-      LOG_DEBUG("Incoming value for PHINode: "<<*value);
-      if(const Function *func=dyn_cast<Function>(value)){
+    for(const Value *income:phiNode->incoming_values()){
+      LOG_DEBUG("Incoming value for PHINode: "<<*income);
+      if(const Function *func=dyn_cast<Function>(income)){
         addFuncName(func->getName().data());
-      }else if(const PHINode *innerPHINode=dyn_cast<PHINode>(value)){
+      }else if(const PHINode *innerPHINode=dyn_cast<PHINode>(income)){
         handlePHINode(innerPHINode);
+      }else if(const Argument * arg=dyn_cast<Argument>(income)){
+        handleArgument(arg);
       }else{
-        LOG_DEBUG("Unhandled PHINode incoming value: "<<*value);
+        LOG_DEBUG("Unhandled PHINode incoming value: "<<*income);
       }
+    }
+  }
+
+  //处理Argument->找到形参Argument
+  //从所在函数的所有调用中获取实参，再递归处理
+  void handleArgument(const Argument *arg){
+    //获取形参位置
+    const unsigned int argIdx=arg->getArgNo();
+    //获取形参所在的函数
+    const Function *parentFunc=arg->getParent();
+
+    for(const User *user:parentFunc->users()){
+      if(const CallInst *callInst=dyn_cast<CallInst>(user)){
+        Value *operand=callInst->getArgOperand(argIdx);
+        handleValue(operand);
+      }else{
+        LOG_DEBUG("Unhandled user of parent function of argument: "<<*user);
+      }
+    } 
+  }
+
+  void handleValue(const Value *value){
+    if(const PHINode *phiNode=dyn_cast<PHINode>(value)){
+      handlePHINode(phiNode);
+    }else if(const Argument *arg=dyn_cast<Argument>(value)){
+      handleArgument(arg);
+    }else{
+      LOG_DEBUG("Unhandled Value: "<<*value);
     }
   }
 
   //CallInst->函数调用，包含调用的函数名、传递给函数的参数
   void handleCallInst(const CallInst *callInst){
+    unsigned int lineno=callInst->getDebugLoc().getLine();
+
     //直接函数调用、或者被优化成直接调用的间接函数调用
     if(const Function *func=callInst->getCalledFunction()){
       std::string funcName=func->getName().data();
@@ -128,16 +160,12 @@ private:
       addFuncName(funcName);
     }else{
       //非直接调用
-      LOG_DEBUG("Indirect function invocation: "<<*callInst);
-      const Value *value=callInst->getCalledOperand();
-      LOG_DEBUG("value of indirect function invocation: "<<*value);
-      if(const PHINode *phiNode=dyn_cast<PHINode>(value)){
-        handlePHINode(phiNode);
-      }else{
-        LOG_DEBUG("Unhandled CallOperand Value: "<<*value);
-      }
+      LOG_DEBUG("Indirect function invocation: "<<lineno<<": "<<*callInst);
+      const Value *operand=callInst->getCalledOperand();
+      LOG_DEBUG("value of indirect function invocation: "<<*operand);
+      handleValue(operand);
     }
-    saveResultAndClearTemp(callInst->getDebugLoc().getLine());
+    saveResultAndClearTemp(lineno);
   }
   
 
