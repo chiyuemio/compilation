@@ -144,6 +144,15 @@ private:
         assert(callInst->getCalledFunction()==parentFunc);
         Value *operand=callInst->getArgOperand(argIdx);
         handleValue(operand);
+      }else if(const PHINode *phiNode=dyn_cast<PHINode>(user)){
+        for(const User *phiUser:phiNode->users()){
+          if(const CallInst *outerCallInst=dyn_cast<CallInst>(phiUser)){
+            Value *operand=outerCallInst->getArgOperand(argIdx);
+            handleValue(operand);
+          }else{
+          LOG_DEBUG("UNhandled user of PHINode: "<<*user);
+          }
+        }
       }else{
         LOG_DEBUG("Unhandled user of parent function of argument: "<<*user);
       }
@@ -182,8 +191,9 @@ private:
       const Value *operand=callInst->getCalledOperand();
       LOG_DEBUG("value of indirect function invocation: "<<*operand);
       if (const CallInst *innerCallInst = dyn_cast<CallInst>(operand)) {
-        const Function *calledFunc = innerCallInst->getCalledFunction();
-        for (const BasicBlock &bb : *calledFunc) {
+        
+        if(const Function *calledFunc = innerCallInst->getCalledFunction()){
+          for (const BasicBlock &bb : *calledFunc) {
           for (const Instruction &i : bb) {
             if (const ReturnInst *retInst = dyn_cast<ReturnInst>(&i)) {
               const Value *retValue = retInst->getReturnValue();
@@ -192,6 +202,29 @@ private:
                 handleArgument(arg);
               } else {
                 LOG_DEBUG("Unhandled return value: " << *retValue);
+              }
+            }
+          }
+        }
+        }else if(true){
+          const Value *innerCallInstOperand=innerCallInst->getCalledOperand();
+          LOG_DEBUG("innerCallINstOperand: "<<*innerCallInstOperand);
+          if(const PHINode *phiNode=dyn_cast<PHINode>(innerCallInstOperand)){
+            for(const Value *income_func:phiNode->incoming_values()){
+              if(const Function *calledFunc=dyn_cast<Function>(income_func)){
+                for(const BasicBlock &bb:*calledFunc){
+                  for(const Instruction &i:bb){
+                    if(const ReturnInst *retInst=dyn_cast<ReturnInst>(&i)){
+                      const Value *retValue=retInst->getReturnValue();
+                      LOG_DEBUG("Meet return value (inner): "<<*retValue);
+                      if(const Argument *arg=dyn_cast<Argument>(retValue)){
+                        handleArgument(arg);
+                      }else{
+                        LOG_DEBUG("Unhandled return value: "<<*retValue);
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -221,7 +254,7 @@ public:
             handleCallInst(callInst);
             saveResultAndClearTemp(callInst->getDebugLoc().getLine());
           }else{
-            
+
           }
         }
       }
