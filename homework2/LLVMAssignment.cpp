@@ -11,6 +11,7 @@
 // in docs/WritingAnLLVMPass.html
 //
 //===----------------------------------------------------------------------===//
+#include<algorithm>
 #include<llvm/IR/Use.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/IRReader/IRReader.h>
@@ -59,17 +60,15 @@ struct FuncPtrPass : public ModulePass {
   FuncPtrPass() : ModulePass(ID) {}
   std::map<Value*, std::vector<Use*>> argTable;
 
-  std::set<std::string> getFunctions(Use& use) {
-        std::set<std::string> funcSet;
+  std::set<Function*> getFunctions(Use& use) {
+        std::set<Function*> funcSet;
         if (auto phi = dyn_cast<PHINode>(use)) {
             for (auto& subUse : phi->incoming_values()) {
                 auto subFuncSet = getFunctions(subUse);
-                for (auto& func : subFuncSet) {
-                    funcSet.insert(func);
-                }
+                funcSet.insert(subFuncSet.begin(),subFuncSet.end());
             }
         }else if (auto f = dyn_cast<Function>(use)) {
-            funcSet.insert(f->getName().str());
+            funcSet.insert(f);
         }else if (auto call = dyn_cast<CallInst>(use)) {
             if (auto func = call->getCalledFunction()) {
                 for (auto block_it = func->begin(); block_it != func->end(); ++block_it) {
@@ -78,53 +77,70 @@ struct FuncPtrPass : public ModulePass {
                         if (auto ret = dyn_cast<ReturnInst>(inst_it)) {
                             for (auto& subUse : ret->getReturnValue()->uses()) {
                                 auto subFuncSet = getFunctions(subUse); 
-                                for (auto& func : subFuncSet) {
-                                    funcSet.insert(func);
-                                }
+                                funcSet.insert(subFuncSet.begin(),subFuncSet.end());
                             }
                         }
                     }
                 }
             }
             else {
-                for (auto& subUse : call->uses()) {
-                    auto subFuncSet = getFunctions(subUse); 
-                    for (auto& func : subFuncSet) {
-                        funcSet.insert(func);
-                    }
+              for (auto& func : getFunctions(call->getCalledOperandUse())) {
+                for (auto block_it = func->begin(); block_it != func->end(); ++block_it) {
+                    for (auto inst_it = block_it->begin(); inst_it != block_it->end(); ++inst_it) {
+                        auto& inst = *inst_it;
+                          if (auto ret = dyn_cast<ReturnInst>(inst_it)) {
+                              for (auto& subUse : ret->getReturnValue()->uses()) {
+                                  auto subFuncSet = getFunctions(subUse); 
+                                  funcSet.insert(subFuncSet.begin(), subFuncSet.end());
+                              }
+                          }
+                      }
+                  }
                 }
             }
         }
         if (!funcSet.size() && argTable.count(use)) {
             for (auto subUse : argTable[use]) {
                 auto subFuncSet = getFunctions(*subUse);
-                for (auto& func : subFuncSet) {
-                    funcSet.insert(func);
-                }
+                funcSet.insert(subFuncSet.begin(),subFuncSet.end());
             }
         }
         return funcSet;
     }
   
+  std::set<CallInst*> getFuncCallUser(User* user) {
+        std::set<CallInst*> callSet;
+        if (auto call = dyn_cast<CallInst>(user)) {
+            callSet.insert(call);
+        }
+        else {
+            for (auto subUser : user->users()) {
+                auto subCallSet = getFuncCallUser(subUser);
+                callSet.insert(subCallSet.begin(), subCallSet.end());
+            }
+        }
+        return callSet;
+    }
+
   void getArgTable(Module& M) {
-        for (auto func_it = M.begin(); func_it != M.end(); ++func_it) {
-            Function &func = *func_it;
-            for (auto func_user : func.users()) {
-                if (auto call = dyn_cast<CallInst>(func_user)) {
-                    auto formalArg = func.arg_begin();
-                    auto actualArg = call->arg_begin();
-                    while (formalArg != func.arg_end() && actualArg != call->arg_end()) {
-                        auto formalArgsName = formalArg->getName().str();
-                        if (argTable.count(formalArg)) {
-                            argTable[formalArg].push_back(actualArg); 
-                        }
-                        else {
-                            argTable[formalArg] = {actualArg};
-                        }
-                        ++formalArg;
-                        ++actualArg;
-                    }
+        for (auto func = M.begin(); func != M.end(); ++func) {
+            
+            for (auto user : func->users()) {
+              auto callSet=getFuncCallUser(user);
+              for(auto call:callSet){
+                auto formalArg = func->arg_begin();
+                auto actualArg = call->arg_begin();
+                while (formalArg != func->arg_end() && actualArg != call->arg_end()) {
+                  auto formalArgsName = formalArg->getName().str();
+                  if (argTable.count(formalArg)) {
+                    argTable[formalArg].push_back(actualArg); 
+                  }else {
+                    argTable[formalArg] = {actualArg};
+                  }
+                  ++formalArg;
+                  ++actualArg;
                 }
+              }
             }
         }
     }
@@ -151,9 +167,9 @@ struct FuncPtrPass : public ModulePass {
                             assert(funcSet.size()!=0);
                             errs() << call->getDebugLoc().getLine() << " : ";
                             auto it = funcSet.begin();
-                            errs() << *it++;
+                            errs() << (*it++)->getName();
                             while (it != funcSet.end()) {
-                                errs() << ", " << *it++;
+                                errs() << ", " << (*it++)->getName();
                             }
                             errs() << "\n";
                         }
