@@ -77,7 +77,7 @@ struct FuncPtrPass : public ModulePass {
 private:
   void addFuncName(const std::string funcName){
     tempFuncNames.insert(funcName);
-    LOG_DEBUG("Add fucntion name: "<<funcName);
+    LOG_DEBUG("Add function name: "<<funcName);
   }
 
   void saveResultAndClearTemp(const unsigned int lineno){
@@ -86,10 +86,14 @@ private:
     if(result==results.end()){
       if(!tempFuncNames.empty()){
         results.insert(std::pair<unsigned int, std::set<std::string>>(lineno, tempFuncNames));
-        LOG_DEBUG("SAve result for line "<<lineno);
+        LOG_DEBUG("Save result for line "<<lineno);
       }
+      
     }else{
-      LOG_DEBUG("wound never happen!");
+      //一行出现多个函数调用
+      
+      auto &funcNames=result->second;
+      funcNames.insert(tempFuncNames.begin(),tempFuncNames.end());
     }
     tempFuncNames.clear();
   }
@@ -126,7 +130,7 @@ private:
 
   void handleFunction(const Function *func){
     std::string funcName=func->getName().data();
-    if(funcName!="lllvm.dbg.value"){
+    if(funcName!="llvm.dbg.value"){
       addFuncName(func->getName().data());
     }
   }
@@ -190,7 +194,7 @@ private:
       LOG_DEBUG("Indirect function invocation: "<<lineno<<": "<<*callInst);
       const Value *operand=callInst->getCalledOperand();
       LOG_DEBUG("value of indirect function invocation: "<<*operand);
-      if (const CallInst *innerCallInst = dyn_cast<CallInst>(operand)) {
+      if(const CallInst *innerCallInst = dyn_cast<CallInst>(operand)) {
         
         if(const Function *calledFunc = innerCallInst->getCalledFunction()){
           for (const BasicBlock &bb : *calledFunc) {
@@ -201,6 +205,7 @@ private:
               if (const Argument *arg = dyn_cast<Argument>(retValue)) {
                 handleArgument(arg);
               } else {
+                
                 LOG_DEBUG("Unhandled return value: " << *retValue);
               }
             }
