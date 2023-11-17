@@ -11,7 +11,7 @@
 // in docs/WritingAnLLVMPass.html
 //
 //===----------------------------------------------------------------------===//
-
+#include<llvm/IR/Use.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/IR/LLVMContext.h>
@@ -28,7 +28,7 @@
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
-
+#include<llvm/IR/Instructions.h>
 
 using namespace llvm;
 static ManagedStatic<LLVMContext> GlobalContext;
@@ -57,15 +57,89 @@ char EnableFunctionOptPass::ID=0;
 struct FuncPtrPass : public ModulePass {
   static char ID; // Pass identification, replacement for typeid
   FuncPtrPass() : ModulePass(ID) {}
+  std::map<Value*, std::vector<Use*>> argTable;
 
+  std::set<std::string> getFunctions(Use& use) {
+        std::set<std::string> funcSet;
+        if (auto phi = dyn_cast<PHINode>(use)) {
+            for (auto& subUse : phi->incoming_values()) {
+                auto subFuncSet = getFunctions(subUse);
+                for (auto& func : subFuncSet) {
+                    funcSet.insert(func);
+                }
+            }
+        }
+        else if (auto f = dyn_cast<Function>(use)) {
+            funcSet.insert(f->getName().str());
+        }
+        if (!funcSet.size() && argTable.count(use)) {
+            for (auto subUse : argTable[use]) {
+                auto subFuncSet = getFunctions(*subUse);
+                for (auto& func : subFuncSet) {
+                    funcSet.insert(func);
+                }
+            }
+        }
+        return funcSet;
+    }
   
+  void getArgTable(Module& M) {
+        for (auto func_it = M.begin(); func_it != M.end(); ++func_it) {
+            Function &func = *func_it;
+            for (auto func_user : func.users()) {
+                if (auto call = dyn_cast<CallInst>(func_user)) {
+                    auto formalArg = func.arg_begin();
+                    auto actualArg = call->arg_begin();
+                    while (formalArg != func.arg_end() && actualArg != call->arg_end()) {
+                        auto formalArgsName = formalArg->getName().str();
+                        if (argTable.count(formalArg)) {
+                            argTable[formalArg].push_back(actualArg); 
+                        }
+                        else {
+                            argTable[formalArg] = {actualArg};
+                        }
+                        ++formalArg;
+                        ++actualArg;
+                    }
+                }
+            }
+        }
+    }
+
   bool runOnModule(Module &M) override {
-    errs() << "Hello: ";
-    errs().write_escaped(M.getName()) << '\n';
-    M.dump();
-    errs()<<"------------------------------\n";
-    return false;
-  }
+        getArgTable(M);
+        for (auto func_it = M.begin(); func_it != M.end(); ++func_it) {
+            Function &func = *func_it;
+            for (auto block_it = func.begin(); block_it != func.end(); ++block_it) {
+                BasicBlock &block = *block_it;
+                for (auto inst_it = block.begin(); inst_it != block.end(); ++inst_it) {
+                    Instruction &inst = *inst_it;
+                    if (auto call = dyn_cast<CallInst>(&inst)) {
+                        if (call->getCalledFunction()) {
+                            auto name = call->getCalledFunction()->getName();
+                            if (name != "llvm.dbg.value") {
+                                errs() << call->getDebugLoc().getLine() << " : ";
+                                errs() << call->getCalledFunction()->getName() << "\n";
+                            }
+                        }
+                        else {
+                            Use& use = call->getCalledOperandUse();
+                            auto funcSet = getFunctions(use);
+                            errs() << call->getDebugLoc().getLine() << " : ";
+                            auto it = funcSet.begin();
+                            errs() << *it++;
+                            while (it != funcSet.end()) {
+                                errs() << ", " << *it++;
+                            }
+                            errs() << "\n";
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
 };
 
 

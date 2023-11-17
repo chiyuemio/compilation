@@ -7,6 +7,8 @@
 #IncludeRegexTransform: 
 
 /home/llvm_10/homework2/assign2/LLVMAssignment.cpp
+llvm/IR/Use.h
+-
 llvm/Support/CommandLine.h
 -
 llvm/IRReader/IRReader.h
@@ -32,5 +34,7 @@ llvm/Support/raw_ostream.h
 llvm/Bitcode/BitcodeReader.h
 -
 llvm/Bitcode/BitcodeWriter.h
+-
+llvm/IR/Instructions.h
 -
 
