@@ -6,7 +6,7 @@
 
 #IncludeRegexTransform: 
 
-/home/llvm_10/homework2/homework2/LLVMAssignment.cpp
+/home/llvm_10/homework2/assign2/LLVMAssignment.cpp
 llvm/Support/CommandLine.h
 -
 llvm/IRReader/IRReader.h
@@ -24,8 +24,6 @@ llvm/Transforms/Scalar.h
 llvm/Transforms/Utils.h
 -
 llvm/IR/Function.h
--
-llvm/IR/Instructions.h
 -
 llvm/Pass.h
 -
