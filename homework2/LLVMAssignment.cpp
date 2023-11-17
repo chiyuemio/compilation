@@ -11,7 +11,7 @@
 // in docs/WritingAnLLVMPass.html
 //
 //===----------------------------------------------------------------------===//
-#include<algorithm>
+
 #include<llvm/IR/Use.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/IRReader/IRReader.h>
@@ -51,137 +51,156 @@ struct EnableFunctionOptPass: public FunctionPass {
 
 char EnableFunctionOptPass::ID=0;
 
+template<typename T>
+void mergeSet(std::set<T>& s1, const std::set<T> s2) {
+    s1.insert(s2.begin(), s2.end());
+}
 	
 ///!TODO TO BE COMPLETED BY YOU FOR ASSIGNMENT 2
 ///Updated 11/10/2017 by fargo: make all functions
 ///processed by mem2reg before this pass.
 struct FuncPtrPass : public ModulePass {
+  using FuncCallTableType = std::map<CallInst*, std::set<Function*>, bool(*)(CallInst*, CallInst*)>;
+
   static char ID; // Pass identification, replacement for typeid
-  FuncPtrPass() : ModulePass(ID) {}
-  std::map<Value*, std::vector<Use*>> argTable;
+  FuncPtrPass() : ModulePass(ID) {
+   // Sort results by row number.
+    funcCallTable = FuncCallTableType([](CallInst* p, CallInst *q) {
+      if (!p) return true;
+      if (!q) return false;
+      return p->getDebugLoc().getLine() < q->getDebugLoc().getLine();
+    });
+  }
+  FuncCallTableType funcCallTable;
+  std::map<Value*, std::set<Use*>> argTable;
+  std::stack<std::pair<CallInst*, Function*>> callStack;
 
   std::set<Function*> getFunctions(Use& use) {
         std::set<Function*> funcSet;
-        if (auto phi = dyn_cast<PHINode>(use)) {
+
+        if(auto f=dyn_cast<Function>(use)){
+          funcSet.insert(f);
+        }else if (auto phi = dyn_cast<PHINode>(use)) {
             for (auto& subUse : phi->incoming_values()) {
-                auto subFuncSet = getFunctions(subUse);
-                funcSet.insert(subFuncSet.begin(),subFuncSet.end());
+                mergeSet<Function*>(funcSet, getFunctions(subUse));
             }
-        }else if (auto f = dyn_cast<Function>(use)) {
-            funcSet.insert(f);
         }else if (auto call = dyn_cast<CallInst>(use)) {
             if (auto func = call->getCalledFunction()) {
-                for (auto block_it = func->begin(); block_it != func->end(); ++block_it) {
-                    for (auto inst_it = block_it->begin(); inst_it != block_it->end(); ++inst_it) {
-                        auto& inst = *inst_it;
-                        if (auto ret = dyn_cast<ReturnInst>(inst_it)) {
-                            for (auto& subUse : ret->getReturnValue()->uses()) {
-                                auto subFuncSet = getFunctions(subUse); 
-                                funcSet.insert(subFuncSet.begin(),subFuncSet.end());
-                            }
-                        }
-                    }
-                }
+                callStack.push({call, func});
+                mergeSet<Function*>(funcSet,getFunctionsFromRetVal(call,func));
+                callStack.pop();
             }
             else {
               for (auto& func : getFunctions(call->getCalledOperandUse())) {
-                for (auto block_it = func->begin(); block_it != func->end(); ++block_it) {
-                    for (auto inst_it = block_it->begin(); inst_it != block_it->end(); ++inst_it) {
-                        auto& inst = *inst_it;
-                          if (auto ret = dyn_cast<ReturnInst>(inst_it)) {
-                              for (auto& subUse : ret->getReturnValue()->uses()) {
-                                  auto subFuncSet = getFunctions(subUse); 
-                                  funcSet.insert(subFuncSet.begin(), subFuncSet.end());
-                              }
-                          }
-                      }
-                  }
+                callStack.push({call, func});
+                mergeSet<Function*>(funcSet, getFunctionsFromRetVal(call,func));
+                callStack.pop();
                 }
             }
+        }else if (argTable.count(use)) {
+            
+            if (callStack.empty()) {
+                for (auto subUse : argTable[use]) {
+                    mergeSet<Function*>(funcSet, getFunctions(*subUse));
+                }
+            } else {
+                auto call = callStack.top().first;
+                auto func = callStack.top().second;
+                auto formalArg = func->arg_begin();
+                auto actualArg = call->arg_begin();
+                while (formalArg != func->arg_end() && actualArg != call->arg_end()) {
+                    if (use == formalArg) {
+                        callStack.pop();
+                        mergeSet<Function*>(funcSet, getFunctions(*actualArg));
+                        callStack.push({call, func});
+                        break;
+                    }
+                    ++formalArg;
+                    ++actualArg;
+                }
         }
-        if (!funcSet.size() && argTable.count(use)) {
-            for (auto subUse : argTable[use]) {
-                auto subFuncSet = getFunctions(*subUse);
-                funcSet.insert(subFuncSet.begin(),subFuncSet.end());
+      }
+    return funcSet;
+  }
+
+  std::set<Function*> getFunctionsFromRetVal(CallInst* call,Function* func) {
+        std::set<Function*> funcSet;
+        for (auto block = func->begin(); block != func->end(); ++block) {
+            for (auto inst = block->begin(); inst != block->end(); ++inst) {
+                if (auto ret = dyn_cast<ReturnInst>(inst)) {
+                    for (auto& subUse : ret->getReturnValue()->uses()) {
+                        mergeSet<Function*>(funcSet, getFunctions(subUse));
+                    }
+                }
             }
         }
         return funcSet;
     }
-  
-  std::set<CallInst*> getFuncCallUser(User* user) {
-        std::set<CallInst*> callSet;
-        if (auto call = dyn_cast<CallInst>(user)) {
-            callSet.insert(call);
-        }
-        else {
-            for (auto subUser : user->users()) {
-                auto subCallSet = getFuncCallUser(subUser);
-                callSet.insert(subCallSet.begin(), subCallSet.end());
-            }
-        }
-        return callSet;
-    }
 
-  void getArgTable(Module& M) {
-        for (auto func = M.begin(); func != M.end(); ++func) {
-            
-            for (auto user : func->users()) {
-              auto callSet=getFuncCallUser(user);
-              for(auto call:callSet){
-                auto formalArg = func->arg_begin();
-                auto actualArg = call->arg_begin();
-                while (formalArg != func->arg_end() && actualArg != call->arg_end()) {
-                  auto formalArgsName = formalArg->getName().str();
-                  if (argTable.count(formalArg)) {
-                    argTable[formalArg].push_back(actualArg); 
-                  }else {
-                    argTable[formalArg] = {actualArg};
-                  }
-                  ++formalArg;
-                  ++actualArg;
-                }
-              }
-            }
-        }
+  void updateArgTable(Function* func, CallInst* call) {
+    assert(func->arg_size() == call->arg_size());
+    auto formalArg = func->arg_begin();
+    auto actualArg = call->arg_begin();
+    while (formalArg != func->arg_end() && actualArg != call->arg_end()) {
+     if (!argTable.count(formalArg)) {
+       argTable[formalArg] = {};
+      }
+      argTable[formalArg].insert(actualArg);
+      ++formalArg;
+      ++actualArg;
     }
+  }
 
   bool runOnModule(Module &M) override {
-        getArgTable(M);
-        for (auto func_it = M.begin(); func_it != M.end(); ++func_it) {
-            Function &func = *func_it;
-            for (auto block_it = func.begin(); block_it != func.end(); ++block_it) {
-                BasicBlock &block = *block_it;
-                for (auto inst_it = block.begin(); inst_it != block.end(); ++inst_it) {
-                    Instruction &inst = *inst_it;
-                    if (auto call = dyn_cast<CallInst>(&inst)) {
-                        if (call->getCalledFunction()) {
-                            auto name = call->getCalledFunction()->getName();
-                            if (name != "llvm.dbg.value") {
-                                errs() << call->getDebugLoc().getLine() << " : ";
-                                errs() << call->getCalledFunction()->getName() << "\n";
-                            }
-                        }
-                        else {
-                            Use& use = call->getCalledOperandUse();
-                            auto funcSet = getFunctions(use);
-                            assert(funcSet.size()!=0);
-                            errs() << call->getDebugLoc().getLine() << " : ";
-                            auto it = funcSet.begin();
-                            errs() << (*it++)->getName();
-                            while (it != funcSet.end()) {
-                                errs() << ", " << (*it++)->getName();
-                            }
-                            errs() << "\n";
-                        }
-                    }
+    while (true) {
+      auto oldFuncCallTable = funcCallTable;
+      for (auto func = M.begin(); func != M.end(); ++func) {
+        for (auto block = func->begin(); block != func->end(); ++block) {
+          for (auto inst = block->begin(); inst != block->end(); ++inst) {
+            if (auto call = dyn_cast<CallInst>(inst)) {                           
+              if (auto calledFunc = call->getCalledFunction()) {
+                if (call->getCalledFunction()->getName() != "llvm.dbg.value") {
+                  if (!funcCallTable.count(call)) {
+                    funcCallTable[call] = {};
+                  }
+                  funcCallTable[call].insert(calledFunc);
+                  updateArgTable(calledFunc, call);
                 }
+              }else {
+                Use& use = call->getCalledOperandUse();
+                auto funcSet = getFunctions(use);
+                if (!funcCallTable.count(call)) {
+                  funcCallTable[call] = {};
+                }
+                for (auto calledFunc : funcSet) {
+                  funcCallTable[call].insert(calledFunc);
+                  updateArgTable(calledFunc, call);
+                }
+               }
             }
+          }
         }
-        return false;
+      }
+      if (funcCallTable == oldFuncCallTable) {
+        for (auto funcCall : funcCallTable) {
+          auto call = funcCall.first; 
+          auto funcSet = funcCall.second;
+          assert(funcSet.size() != 0);
+          errs() << call->getDebugLoc().getLine() << " : ";
+          auto it = funcSet.begin();
+          errs() << (*it++)->getName();
+          while (it != funcSet.end()) {
+            errs() << ", " << (*it++)->getName();
+          }
+          errs() << "\n";
+          }
+          break;
+        }
+      }
+     return false;
     }
-
+  
 };
-
 
 char FuncPtrPass::ID = 0;
 static RegisterPass<FuncPtrPass> X("funcptrpass", "Print function call instruction");
